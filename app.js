@@ -10,6 +10,9 @@ app.use(cors());
 // token จาก messaging api
 const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
+app.get("/", (req, res) => {
+  res.send("Start Server");
+});
 app.post("/register", async (req, res) => {
   const { name, phone, userId } = req.body;
 
