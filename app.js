@@ -1,90 +1,105 @@
 require("dotenv").config();
 const express = require("express");
-const bodyParser = require("body-parser");
 const axios = require("axios");
 const cors = require("cors");
+const qs = require("qs");
 
 const app = express();
-app.use(bodyParser.json());
 app.use(cors());
-// token จาก messaging api
+app.use(express.json());
+
+const CLIENT_ID = process.env.LINE_CLIENT_ID;
+const CLIENT_SECRET = process.env.LINE_CLIENT_SECRET;
+const REDIRECT_URI = process.env.LINE_REDIRECT_URI;
+
+app.get("/api/test", (req, res) => {
+  res.json({ message: "Backend is working!" });
+});
+
+// Line Messaging
 const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 
-app.get("/", (req, res) => {
-  res.send("Start Server");
-});
-app.post("/register", async (req, res) => {
-  const { name, phone, userId } = req.body;
+// API ที่ใช้สำหรับส่ง Push Message ไปที่ LINE ตาม userId
+app.post("/api/send-push-message", async (req, res) => {
+  const { userId, message } = req.body;
 
-  if (!name || !phone || !userId) {
-    return res.status(400).json({ message: "ข้อมูลไม่ครบ" });
-  }
-
-  console.log("📌 ลงทะเบียนสำเร็จ:", { name, phone, userId });
-
-  // 🔹 ส่ง Push Message ไปยัง LINE User
   try {
-    await axios.post(
+    const response = await axios.post(
       "https://api.line.me/v2/bot/message/push",
       {
-        to: userId,
+        to: userId, // userId ที่ได้รับจาก frontend
         messages: [
           {
             type: "text",
-            text: `✅ ลงทะเบียนสำเร็จ!\nชื่อ: ${name}\nเบอร์โทร: ${phone}`,
+            text: message, // ข้อความที่ต้องการส่ง
           },
         ],
       },
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${CHANNEL_ACCESS_TOKEN}`,
+          Authorization: `Bearer ${CHANNEL_ACCESS_TOKEN}`, // ใส่ Channel Access Token ของคุณ
         },
       }
     );
 
-    res.json({ message: "ลงทะเบียนสำเร็จ! และส่งข้อความไปยัง LINE แล้ว" });
+    res.json({ success: true, message: "Push message sent!" });
   } catch (error) {
-    console.error("❌ ส่งข้อความล้มเหลว:", error.response?.data);
-    res.status(500).json({ message: "ลงทะเบียนสำเร็จ แต่ส่งข้อความไม่สำเร็จ" });
+    console.error(
+      "Error sending push message:",
+      error.response?.data || error.message
+    );
+    res.status(500).json({ error: "Failed to send push message" });
   }
 });
 
-// ตรวจสอบว่า userId เป็นเพื่อนกับบอทหรือยัง
-app.get("/api/check-friend/:userId", async (req, res) => {
-  const userId = req.params.userId;
-  console.log("userId ", userId);
-  console.log("CHANNEL_ACCESS_TOKEN ", CHANNEL_ACCESS_TOKEN);
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body;
+  if (username === "test" && password === "1234") {
+    res.json({ success: true, message: "Login successful!" });
+  } else {
+    res.status(401).json({ success: false, message: "Invalid credentials" });
+  }
+});
 
+app.post("/api/auth/callback", async (req, res) => {
+  const { code } = req.body; // รับค่า code จาก body ของ request
   try {
-    const response = await axios.get(
-      `https://api.line.me/v2/bot/followers/contains`,
+    // สร้าง payload ด้วย qs สำหรับการส่งข้อมูลแบบ x-www-form-urlencoded
+    const payload = qs.stringify({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: REDIRECT_URI,
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+    });
+
+    // เรียก API ของ LINE เพื่อรับ access_token
+    const response = await axios.post(
+      "https://api.line.me/oauth2/v2.1/token",
+      payload,
       {
         headers: {
-          Authorization: `Bearer ${CHANNEL_ACCESS_TOKEN}`,
-          "Content-Type": "application/json", // เพิ่ม Content-Type
-        },
-        params: {
-          userId: userId, // userId ที่ต้องการตรวจสอบ
+          "Content-Type": "application/x-www-form-urlencoded",
         },
       }
     );
 
-    // ตรวจสอบสถานะเพื่อน
-    if (response.data) {
-      res.json({ isFriend: response.data.contains });
-    } else {
-      res.json({ isFriend: false });
-    }
+    const accessToken = response.data.access_token;
+    console.log("accessToken", accessToken);
+
+    // ใช้ access_token เพื่อดึงข้อมูลโปรไฟล์ของผู้ใช้
+    const profileResponse = await axios.get("https://api.line.me/v2/profile", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    res.json({ user: profileResponse.data, accessToken });
   } catch (error) {
-    console.error("Error checking friend status", error);
-    res.status(500).send("Internal Server Error");
+    console.error("LINE Login Error:", error.response?.data || error.message);
+    res.status(500).json({ error: "Failed to login with LINE" });
   }
 });
 
-// app.listen(5000, () => console.log("🚀 Server running on port 5000"));
-// Start server
-const PORT = process.env.PORT || 9000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}.`);
-});
+// Start Server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
