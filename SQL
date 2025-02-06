@@ -1,0 +1,8 @@
+CREATE DATABASE line_chatbot;
+
+
+CREATE TABLE users (
+    user_id VARCHAR(50) PRIMARY KEY,
+    display_name VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
